@@ -1,0 +1,174 @@
+#########################################################################
+#####                                Introduction                   #####
+use db_agg
+db.people.insertMany([
+	{"name" : "Ada", "age" : 20},
+	{"name" : "Fred", "age" : 35},
+	{"name" : "Susan", "age" : 60},
+	{"name" : "Andy", "age" : 35}
+])
+
+# Qry classique SQL
+SELECT name FROM people WHERE age = 35 ORDER BY name
+
+# L'équivalent en MongoDB (ce que ns avons l'hab d'éxecuter)
+db.people.find( {'age':35}, {'name':1, '_id': 0} ).sort( {'name':1} )
+
+# La Qry avec aggregate => même résultat
+# La fonction "aggregate()" permet de spécifier des chaînes d’opérations, appelées pipeline d’agrégation ou encore stage.
+
+db.people.aggregate( [
+    { $match : {
+        "age":35
+    }},
+    { $project : {
+        "name":1, "_id":0
+    }},
+    { $sort : {
+        "name":1
+    }}
+] )
+
+# Qry devient un peu plus lourd à écrire.
+
+{$match : {} } : Il correspond au 1è param de la requête find
+{$project : {} } : Il correspond au 2è param de la requête find.
+...
+{$group : {} } : Equivalent du GROUP BY en SQL
+{$unwind : {} }
+{$sort : {} }
+
+# Q : Cmnt alléger l'écrirure de la Qry ?
+# R1 : Passer par des vars !!!
+
+varMatch = { $match : { age:35} }
+varProject = { $project : {name:1, age:1, _id:0} }
+varSort = { $sort : {name:1} }
+
+db.people.aggregate( [varMatch, varProject, varSort] )
+
+# R2 : déclarer un array JS de stage !!!
+
+pipeline = [
+  { $match : { … },
+  { $group : { … },
+  { $sort : { … },
+  ...
+]
+db.collectionName.aggregate(pipeline, options)
+
+
+#########################################################################
+#####                                        Démo                   #####
+Q : Importer la collection website ds db_agg ?
+# R :
+db.websites.insertMany([
+{ "_id" : 1, "domainName" : "test1.com", "hosting" : "hostgator.com" },
+{ "_id" : 2, "domainName" : "test2.com", "hosting" : "aws.amazon.com"},
+{ "_id" : 3, "domainName" : "test3.com", "hosting" : "aws.amazon.com" },
+{ "_id" : 4, "domainName" : "test4.com", "hosting" : "hostgator.com" },
+{ "_id" : 5, "domainName" : "test5.com", "hosting" : "aws.amazon.com" },
+{ "_id" : 6, "domainName" : "test6.com", "hosting" : "cloud.google.com" },
+{ "_id" : 7, "domainName" : "test7.com", "hosting" : "aws.amazon.com" },
+{ "_id" : 8, "domainName" : "test8.com", "hosting" : "hostgator.com" },
+{ "_id" : 9, "domainName" : "test9.com", "hosting" : "cloud.google.com" },
+{ "_id" : 10, "domainName" : "test10.com", "hosting" : "godaddy.com" }
+])
+
+# Q : Répartition des sites par hébérgeur ; tri décroissant sur le nb de sites hébérgés ; Stocker le résultat de la Qry ds 1 nouvelle collec ; Exporter le résultat en json et en csv ?
+
+# SQL :
+SELECT hosting, SUM(hosting) AS total
+       FROM websites
+       GROUP BY hosting
+       ORDER BY total DESC
+
+# MongoDB
+repart_site_hebergeur = { $group : {_id : "$hosting", total : { $sum : 1 }} }
+tri = {$sort : {total : -1}}
+db.websites.aggregate( [repart_site_hebergeur, tri] )
+
+# L'opérateur $group doit contenir obligatoirement une clé de groupement (_id), puis une clé (total) à laquelle on associe la fonction d'agrégation ($sum).
+
+# Stocker le résultat dans une nouvelle collection
+db.websites.aggregate( [repart_site_hebergeur, tri, {$out : "websites_grouped"}] )
+# Verif
+db.websites_grouped.find().pretty()
+
+# Export en JSON
+mongoexport -d db_agg -c websites_grouped -o "C:/Users/bejao/OneDrive/DB/NoSQL/MongoDB/2 ProjetAggregation/fichiersApprenants/websites_grouped.json"
+
+# Export en csv
+mongoexport -d db_agg -c websites_grouped -f _id, total -o "C:/Users/bejao/OneDrive/DB/NoSQL/MongoDB/2 ProjetAggregation/websites_grouped.csv" --type=csv
+
+# Q : Combien de sites sont hébergés par amazon ?
+db.websites.aggregate(
+    {
+    $match : {hosting : "aws.amazon.com"}
+    },
+    {
+    $group : { _id : "$hosting", total : { $sum : 1 } }
+    }
+  )
+
+#########################################################################
+#####                   Exercice  Aggréger des restaurants         #####
+
+Q : Créer 1DB restaurant, ajouter 1 collection "restaurants", la remplir avec le fichier restaurants.json.
+Rq: Préciser, lors de l'injection du fichier json, dans la commande "mongoimport" la possibilité de supprimer la collection si elle existe (pour qu'elle soit recréer de nouveau et y injecter de la data fraîche).
+# Indice : 25357 restaurant en tout
+
+mongoimport -d db_agg -c restaurants --drop --file "C:/Users/bejao/OneDrive/DB/NoSQL/MongoDB/2 ProjetAggregation/fichiersApprenants/restaurants.json"
+# S : imported 25357 documents
+
+Répondre aux questions suivantes :
+
+# Q : La répartition des restaurants par quartier ?
+# Indice : quartier => key 'borough'
+
+
+# Q : La répartition des restaurants dont la dernière inspection a donné un grade "C" par quartier ?
+# Indice : la dernière inspection : la plus récente, donc la première de la liste !
+# key : "grade"
+
+
+# Q : Calculer le score moyen des resto par quartier et trier par score décroissant ?
+# Indice : utiliser l'opérateur unwid
+{ "_id" : "Queens", "moyenne" : 11.634865110930088 }
+{ "_id" : "Brooklyn", "moyenne" : 11.447723132969035 }
+{ "_id" : "Manhattan", "moyenne" : 11.41823125728344 }
+{ "_id" : "Staten Island", "moyenne" : 11.370957711442786 }
+{ "_id" : "Bronx", "moyenne" : 11.036186099942562 }
+{ "_id" : "Missing", "moyenne" : 9.632911392405063 }
+
+
+#########################################################################
+#####                   Exercice  Aggréger des transactions         #####
+Q : Créer une collection "transactions" à partir du fichier transactions.json et répondre aux questions suivantes :
+
+Q-1. Calculer le montant total des paiements ?
+# Indice : key : Payment.Total
+
+
+Q-2. Calculer le montant total par transactions (montant total du panier) ?
+
+
+
+Q-3. Calculate total payments (Payment.Total) for each payment type (Payment.Type) ?
+
+
+
+Q-4. Trouver l'Id le plus élevé.
+
+
+Q-5. Find the max price (Transaction.price) ?
+
+
+#########################################################################
+#####       					 	         distinct		    	               	 	#####
+# Q : Age unique => distinct ?
+db.people.distinct("age")
+# S : [ 20, 35, 60 ]
+Q : Peut-on faire un distinct sur plusieurs key ?
+db.people.distinct("name", "age")
+# R : Ce n'est pas possible de faire un distinct sur plusieurs key => Il faut passer par map reduce !
